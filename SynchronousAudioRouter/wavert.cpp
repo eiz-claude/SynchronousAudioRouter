@@ -21,7 +21,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     ULONG notificationCount, PKSRTAUDIO_BUFFER buffer)
 {
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
-    SarControlContext *controlContext = endpoint->owner;
+    SarControlContext *controlContext;
     SarEndpointProcessContext *processContext;
     NTSTATUS status;
 
@@ -29,6 +29,8 @@ NTSTATUS SarKsPinRtGetBufferCore(
         SAR_ERROR("No valid endpoint");
         return STATUS_NOT_FOUND;
     }
+
+    controlContext = endpoint->owner;
 
     if (baseAddress != nullptr) {
         SAR_ERROR("It wants a specific address");
