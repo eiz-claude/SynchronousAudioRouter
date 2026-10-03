@@ -276,6 +276,20 @@ if ($Scenarios -contains 'matrix') {
     }
 }
 
+# Timeline of SAR interface and endpoint state changes across the race, kill
+# and recovery scenarios, for lining up with what their clients saw.
+$watchProc = $null
+if ($Scenarios -contains 'race' -or $Scenarios -contains 'kill') {
+    $watchStop = Join-Path $ResultsDir 'watch.stop'
+    $watchJson = Join-Path $ResultsDir 'watch.json'
+    Remove-Item $watchStop -ErrorAction SilentlyContinue
+    $watchProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru `
+        -RedirectStandardOutput (Join-Path $ResultsDir 'watch.log') `
+        -ArgumentList @('watch', '--duration', 3600, '--stop-file', "`"$watchStop`"",
+            '--results', "`"$watchJson`"")
+    $null = $watchProc.Handle
+}
+
 if ($Scenarios -contains 'race') {
     # Start and stop the host over and over while other threads keep opening
     # streams on its endpoints: the start-up race reported against
@@ -324,6 +338,11 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
 
     $summary.scenarios += Invoke-Scenario 'recovery-after-kill' (
         @('run', '--endpoints', $count, '--iterations', 1, '--duration', $Duration) + $common)
+}
+
+if ($watchProc) {
+    New-Item -ItemType File -Path $watchStop -Force | Out-Null
+    if (-not $watchProc.WaitForExit(30000)) { try { $watchProc.Kill() } catch { } }
 }
 
 if ($Scenarios -contains 'browser') {
