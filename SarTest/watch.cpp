@@ -51,9 +51,10 @@ std::string referenceString(const std::wstring& path)
     return narrow(slash == std::wstring::npos ? path : path.substr(slash + 1));
 }
 
-std::set<std::string> enabledInterfaces(const std::wstring& instanceId)
+// Reference string -> interface path of every enabled SAR KS interface.
+std::map<std::string, std::wstring> enabledInterfacePaths(const std::wstring& instanceId)
 {
-    std::set<std::string> result;
+    std::map<std::string, std::wstring> result;
     ULONG length = 0;
 
     if (CM_Get_Device_Interface_List_SizeW(&length, (LPGUID)&kKsCategoryAudio,
@@ -71,10 +72,35 @@ std::set<std::string> enabledInterfaces(const std::wstring& instanceId)
     }
 
     for (const wchar_t *p = buffer.data(); *p; p += wcslen(p) + 1) {
-        result.insert(referenceString(p));
+        result[referenceString(p)] = p;
     }
 
     return result;
+}
+
+std::set<std::string> enabledInterfaces(const std::wstring& instanceId)
+{
+    std::set<std::string> result;
+
+    for (const auto& pair : enabledInterfacePaths(instanceId)) {
+        result.insert(pair.first);
+    }
+
+    return result;
+}
+
+// Opens a KS filter instance the way a client does, and closes it again.
+DWORD probeFilter(const std::wstring& path)
+{
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        return GetLastError();
+    }
+
+    CloseHandle(handle);
+    return ERROR_SUCCESS;
 }
 
 struct WatchEvent
@@ -253,6 +279,9 @@ std::string runWatch(const WatchOptions& options)
     logf("%zu SAR interfaces enabled at start", enabled.size());
 
     double deadline = originMs + options.durationSeconds * 1000.0;
+    double nextProbe = originMs;
+    std::map<std::string, DWORD> lastProbe;
+    long long probes = 0, probeFailures = 0;
 
     while (nowMs() < deadline) {
         if (!options.stopFile.empty() &&
@@ -278,6 +307,33 @@ std::string runWatch(const WatchOptions& options)
         }
 
         enabled.swap(now);
+
+        if (options.probeMs > 0 && nowMs() >= nextProbe) {
+            nextProbe = nowMs() + options.probeMs;
+
+            for (const auto& pair : enabledInterfacePaths(instanceId)) {
+                double t0 = nowMs();
+                DWORD result = probeFilter(pair.second);
+                double took = nowMs() - t0;
+                auto it = lastProbe.find(pair.first);
+
+                probes++;
+                probeFailures += result != ERROR_SUCCESS;
+
+                if (it == lastProbe.end() || it->second != result || took > 500) {
+                    char detail[96];
+
+                    sprintf_s(detail, "%s (%lu) in %.0f ms",
+                        result == ERROR_SUCCESS ? "opened" : "open failed",
+                        result, took);
+                    logf("probe %s: %s", pair.first.c_str(), detail);
+                    watcher.addEvent({ t0 - originMs, "probe", pair.first, detail });
+                }
+
+                lastProbe[pair.first] = result;
+            }
+        }
+
         Sleep((DWORD)options.pollMs);
     }
 
@@ -303,6 +359,8 @@ std::string runWatch(const WatchOptions& options)
         .setInt("exitCode", 0)
         .setString("sarDevice", narrow(instanceId))
         .setInt("events", (long long)items.size())
+        .setInt("probes", probes)
+        .setInt("probeFailures", probeFailures)
         .setRaw("timeline", jsonArray(items));
     return result.str();
 }

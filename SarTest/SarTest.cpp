@@ -67,10 +67,11 @@ int usage()
         "      Watch the audio sessions on every active playback endpoint and\n"
         "      report which processes played and how loud; with --process, fail\n"
         "      unless that process reached --min-peak (default 0.01).\n"
-        "  SarTest watch [--duration S] [--stop-file <path>] [--poll MS]\n"
+        "  SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]\n"
         "      Log every change in which SAR KS interfaces are enabled and every\n"
         "      endpoint state change, with timestamps, until S seconds pass or\n"
-        "      the stop file exists.\n"
+        "      the stop file exists. --probe MS also opens every enabled SAR filter\n"
+        "      that often and logs each change in the result.\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -867,6 +868,7 @@ int cmdWatch(const Args& args)
     options.durationSeconds = args.getDouble(L"duration", 60.0);
     options.stopFile = args.get(L"stop-file", L"");
     options.pollMs = args.getInt(L"poll", 20);
+    options.probeMs = args.getInt(L"probe", 0);
     writeResults(args, runWatch(options));
     return 0;
 }

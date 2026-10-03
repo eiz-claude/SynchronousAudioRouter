@@ -30,6 +30,9 @@ struct WatchOptions
     double durationSeconds = 60.0;
     std::wstring stopFile;
     int pollMs = 20;
+    // How often to try opening every enabled SAR filter by its interface
+    // path, logging each change in the result; 0 to not probe.
+    int probeMs = 0;
 };
 
 // Returns the results JSON.

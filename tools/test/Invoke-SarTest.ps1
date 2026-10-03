@@ -285,7 +285,7 @@ if ($Scenarios -contains 'race' -or $Scenarios -contains 'kill') {
     Remove-Item $watchStop -ErrorAction SilentlyContinue
     $watchProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru `
         -RedirectStandardOutput (Join-Path $ResultsDir 'watch.log') `
-        -ArgumentList @('watch', '--duration', 3600, '--stop-file', "`"$watchStop`"",
+        -ArgumentList @('watch', '--duration', 3600, '--probe', 1000, '--stop-file', "`"$watchStop`"",
             '--results', "`"$watchJson`"")
     $null = $watchProc.Handle
 }
