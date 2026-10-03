@@ -89,6 +89,73 @@ std::set<std::string> enabledInterfaces(const std::wstring& instanceId)
     return result;
 }
 
+// CPU time used so far by the process hosting a service (its own svchost on
+// machines with enough memory), so a busy endpoint builder shows up even when
+// it changes nothing anyone can observe.
+class ServiceCpu
+{
+public:
+    explicit ServiceCpu(const wchar_t *service)
+    {
+        SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+        SC_HANDLE svc = scm ? OpenServiceW(scm, service, SERVICE_QUERY_STATUS) : nullptr;
+        SERVICE_STATUS_PROCESS status = {};
+        DWORD needed = 0;
+
+        if (svc && QueryServiceStatusEx(svc, SC_STATUS_PROCESS_INFO,
+                (LPBYTE)&status, sizeof(status), &needed)) {
+            _process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                status.dwProcessId);
+        }
+
+        if (svc) {
+            CloseServiceHandle(svc);
+        }
+
+        if (scm) {
+            CloseServiceHandle(scm);
+        }
+
+        _last = totalMs();
+    }
+
+    ~ServiceCpu()
+    {
+        if (_process) {
+            CloseHandle(_process);
+        }
+    }
+
+    // Milliseconds of CPU used since the previous call.
+    double delta()
+    {
+        double now = totalMs();
+        double result = now - _last;
+
+        _last = now;
+        return result;
+    }
+
+private:
+    double totalMs()
+    {
+        FILETIME created, exited, kernel, user;
+
+        if (!_process || !GetProcessTimes(_process, &created, &exited, &kernel, &user)) {
+            return 0.0;
+        }
+
+        auto ms = [](const FILETIME& ft) {
+            return (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10000.0;
+        };
+
+        return ms(kernel) + ms(user);
+    }
+
+    HANDLE _process = nullptr;
+    double _last = 0.0;
+};
+
 // Opens a KS filter instance the way a client does, and closes it again.
 DWORD probeFilter(const std::wstring& path)
 {
@@ -280,6 +347,9 @@ std::string runWatch(const WatchOptions& options)
 
     double deadline = originMs + options.durationSeconds * 1000.0;
     double nextProbe = originMs;
+    double nextCpu = originMs + 1000.0;
+    ServiceCpu builderCpu(L"AudioEndpointBuilder");
+    ServiceCpu audiosrvCpu(L"Audiosrv");
     std::map<std::string, DWORD> lastProbe;
     long long probes = 0, probeFailures = 0;
 
@@ -307,6 +377,21 @@ std::string runWatch(const WatchOptions& options)
         }
 
         enabled.swap(now);
+
+        if (nowMs() >= nextCpu) {
+            double builder = builderCpu.delta();
+            double audiosrv = audiosrvCpu.delta();
+
+            nextCpu += 1000.0;
+
+            if (builder >= 50.0 || audiosrv >= 50.0) {
+                char detail[96];
+
+                sprintf_s(detail, "builder %.0f ms, audiosrv %.0f ms", builder, audiosrv);
+                logf("cpu %s", detail);
+                watcher.addEvent({ nowMs() - originMs, "cpu", "services", detail });
+            }
+        }
 
         if (options.probeMs > 0 && nowMs() >= nextProbe) {
             nextProbe = nowMs() + options.probeMs;

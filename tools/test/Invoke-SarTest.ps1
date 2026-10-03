@@ -36,7 +36,9 @@ param(
     [switch]$SkipKillTest,
     # Any of issues, matrix, race, kill, browser. Installation always runs.
     [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'browser'),
-    [int]$RaceCycles = 10
+    [int]$RaceCycles = 10,
+    # Idle time between the race and the kill scenario (diagnostics).
+    [int]$PostRaceDelaySeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -298,6 +300,11 @@ if ($Scenarios -contains 'race') {
     $summary.scenarios += Invoke-Scenario "race-${count}x${Channels}" (
         @('race', '--endpoints', $count, '--cycles', $RaceCycles, '--up', 3, '--down', 200,
           '--openers', 4) + $common)
+}
+
+if ($PostRaceDelaySeconds -gt 0 -and $Scenarios -contains 'race') {
+    Write-Host "==> idling $PostRaceDelaySeconds s after the race"
+    Start-Sleep -Seconds $PostRaceDelaySeconds
 }
 
 if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
