@@ -580,6 +580,26 @@ void SarClient::mux(
     }
 }
 
+// On Windows 10 and later the driver puts each endpoint's channel count,
+// sample rate and sample size into its KS reference string (see
+// SarCreateEndpoint), so an endpoint whose format changed is a new endpoint
+// to Windows and no format change event is needed.
+static bool endpointIdIncludesFormat()
+{
+    typedef LONG (WINAPI *RtlGetVersionFn)(PRTL_OSVERSIONINFOW);
+    static const bool result = [] {
+        RTL_OSVERSIONINFOW info = {};
+        auto rtlGetVersion = (RtlGetVersionFn)GetProcAddress(
+            GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
+
+        info.dwOSVersionInfoSize = sizeof(info);
+        return rtlGetVersion && rtlGetVersion(&info) == 0 &&
+            info.dwMajorVersion >= 10;
+    }();
+
+    return result;
+}
+
 HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
     _In_  LPCWSTR pwstrDeviceId,
     _In_  DWORD dwNewState)
@@ -591,7 +611,7 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
     // KSEVENT_PINCAPS_FORMATCHANGE event, which causes the audio engine to
     // re-query the pin capabilities. This isn't needed for newly added
     // endpoints or non-SAR endpoints, so we filter out those events.
-    if (dwNewState != DEVICE_STATE_ACTIVE) {
+    if (dwNewState != DEVICE_STATE_ACTIVE || endpointIdIncludesFormat()) {
         return S_OK;
     }
 
